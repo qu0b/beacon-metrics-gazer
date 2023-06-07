@@ -55,6 +55,10 @@ struct Cli {
     /// Metrics server bind address
     #[arg(long, default_value = "127.0.0.1")]
     address: String,
+
+    // poll metrics in a fixed interval
+    #[arg(long, short)]
+    poll: Option<u64>,
 }
 
 type IndexRanges = Vec<(String, Range<usize>)>;
@@ -205,6 +209,7 @@ async fn task_fetch_state_every_epoch(
     extra_headers: &HeaderMap,
     ranges: &IndexRanges,
     dump: bool,
+    poll: Option<u64>,
 ) -> Result<()> {
     loop {
         match current_epoch_start_slot(genesis, config) {
@@ -230,11 +235,18 @@ async fn task_fetch_state_every_epoch(
 
         // Run once on boot, then every interval at end of epoch
 
-        time::sleep(to_next_epoch_start(genesis, config).unwrap_or_else(|e| {
-            eprintln!("error computing to_next_epoch_start: {:?}", e);
-            Duration::from_secs(config.seconds_per_slot * config.slots_per_epoch)
-        }))
-        .await;
+        match poll {
+            None => {
+                time::sleep(to_next_epoch_start(genesis, config).unwrap_or_else(|e| {
+                    eprintln!("error computing to_next_epoch_start: {:?}", e);
+                    Duration::from_secs(config.seconds_per_slot * config.slots_per_epoch)
+                }))
+                .await;
+            }
+            Some(n) => {
+                time::sleep(Duration::from_secs(n)).await;
+            },
+        }
     }
 }
 
@@ -287,6 +299,7 @@ async fn main() -> Result<()> {
             &extra_headers,
             &ranges,
             cli.dump,
+            cli.poll,
         )
         .await
     });
