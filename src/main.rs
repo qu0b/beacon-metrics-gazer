@@ -194,20 +194,22 @@ fn set_participation_to_metrics(participation_by_range: &ParticipationByRange) {
 }
 
 
-fn dump_participation(participation_by_range: &ParticipationByRange, format: DumpFormat) {
+fn dump_participation(slot: u64, participation_by_range: &ParticipationByRange, format: DumpFormat) {
+    print!("statistics for slot: {}: ", slot);
     match format {
-        DumpFormat::Json => dump_participation_to_stdout_json(participation_by_range),
-        DumpFormat::Table => dump_participation_to_stdout(participation_by_range),
+        DumpFormat::Json => dump_participation_to_stdout_json(slot, participation_by_range),
+        DumpFormat::Table => dump_participation_to_stdout(slot, participation_by_range),
         _ => ()
     }
 }
 
 
-fn dump_participation_to_stdout(participation_by_range: &ParticipationByRange) {
+fn dump_participation_to_stdout(slot: u64, participation_by_range: &ParticipationByRange) {
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
 
     table.add_row(Row::new(vec![
+        Cell::new("Slot"),
         Cell::new("Name"),
         Cell::new("Range"),
         Cell::new("Source"),
@@ -217,6 +219,7 @@ fn dump_participation_to_stdout(participation_by_range: &ParticipationByRange) {
 
     for (range_name, range, summary) in participation_by_range.iter() {
         table.add_row(Row::new(vec![
+            Cell::new(&format!("{:?}", slot)),
             Cell::new(range_name),
             Cell::new(&format!("{:?}", &range)),
             Cell::new(&summary.source_participation_ratio.to_string()),
@@ -230,6 +233,7 @@ fn dump_participation_to_stdout(participation_by_range: &ParticipationByRange) {
 
 #[derive(Serialize)]
 struct ParticipationRecord {
+    slot: u64,
     name: String,
     range: String,
     source: String,
@@ -237,11 +241,12 @@ struct ParticipationRecord {
     head: String,
 }
 
-fn dump_participation_to_stdout_json(participation_by_range: &ParticipationByRange) {
+fn dump_participation_to_stdout_json(slot: u64, participation_by_range: &ParticipationByRange) {
     let mut records = Vec::new();
 
     for (range_name, range, summary) in participation_by_range.iter() {
         records.push(ParticipationRecord {
+            slot: slot,
             name: range_name.clone(),
             range: format!("{:?}", range),
             source: summary.source_participation_ratio.to_string(),
@@ -277,7 +282,7 @@ async fn task_fetch_state_every_epoch(
                             set_participation_to_metrics(&participation_by_range);
                             
                             if let Some(format) = dump_format {
-                                dump_participation(&participation_by_range, format);
+                                dump_participation(slot, &participation_by_range, format);
                             }
                                
                         }
