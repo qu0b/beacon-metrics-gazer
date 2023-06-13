@@ -10,6 +10,9 @@ use hyper::{Body, HeaderMap, Request, Response, Server};
 use metrics::{
     set_gauge, HEAD_PARTICIPATION, INACTIVITY_SCORES, SOURCE_PARTICIPATION, TARGET_PARTICIPATION,
 };
+
+use finality::{fetch_checkpoint_finality};
+
 use prettytable::{format, Cell, Row, Table};
 use prometheus::{Encoder, TextEncoder};
 use ssz_state::{deserialize_partial_state, StatePartial};
@@ -22,6 +25,7 @@ use tokio::time;
 use serde::Serialize;
 use serde_json::to_string;
 
+
 //use ssz_state::parse_epoch_participation;
 //use ssz_state::ConfigSpec;
 
@@ -30,6 +34,7 @@ mod metrics;
 mod ranges;
 mod ssz_state;
 mod util;
+mod finality;
 
 #[derive(Clone, Copy)]
 enum DumpFormat {
@@ -194,12 +199,12 @@ fn set_participation_to_metrics(participation_by_range: &ParticipationByRange) {
 }
 
 
-fn dump_participation(slot: u64, participation_by_range: &ParticipationByRange, format: DumpFormat) {
-    print!("statistics for slot: {}: ", slot);
+fn dump_participation(slot: u64, participation_by_range: &ParticipationByRange, format: Option<DumpFormat>) {
+    println!("statistics for slot: {}: ", slot);
     match format {
-        DumpFormat::Json => dump_participation_to_stdout_json(slot, participation_by_range),
-        DumpFormat::Table => dump_participation_to_stdout(slot, participation_by_range),
-        _ => ()
+        Some(DumpFormat::Json) => dump_participation_to_stdout_json(slot, participation_by_range),
+        Some(DumpFormat::Table) => dump_participation_to_stdout(slot, participation_by_range),
+        None => ()
     }
 }
 
@@ -256,7 +261,7 @@ fn dump_participation_to_stdout_json(slot: u64, participation_by_range: &Partici
     }
 
     let json = to_string(&records).unwrap();
-    println!("{}", json);
+    println!("Participation: {}", json);
 }
 
 async fn task_fetch_state_every_epoch(
@@ -280,13 +285,14 @@ async fn task_fetch_state_every_epoch(
                         Ok(state) => {
                             let participation_by_range = group_target_participation(ranges, &state);
                             set_participation_to_metrics(&participation_by_range);
-                            
-                            if let Some(format) = dump_format {
-                                dump_participation(slot, &participation_by_range, format);
-                            }
+                            dump_participation(slot, &participation_by_range, dump_format);
                                
                         }
                     }
+
+                    let data = fetch_checkpoint_finality(beacon_url, "head").await?;
+                    let json = to_string(&data).unwrap();
+                    println!("Finality Checkpoint: {}", json);
                 }
             }
         }

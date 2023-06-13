@@ -25,7 +25,7 @@ struct ConfigSpecResponse {
     data: ConfigSpecResponseData,
 }
 
-pub async fn fetch_config(url: &str) -> Result<ConfigSpec> {
+pub async fn  fetch_config(url: &str) -> Result<ConfigSpec> {
     let response = reqwest::get(format!("{url}/eth/v1/config/spec")).await?;
     let data: ConfigSpecResponse = response.json().await?;
     Ok(ConfigSpec {
