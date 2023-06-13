@@ -10,6 +10,9 @@ use hyper::{Body, HeaderMap, Request, Response, Server};
 use metrics::{
     set_gauge, HEAD_PARTICIPATION, INACTIVITY_SCORES, SOURCE_PARTICIPATION, TARGET_PARTICIPATION,
 };
+
+use finality::{fetch_checkpoint_finality};
+
 use prettytable::{format, Cell, Row, Table};
 use prometheus::{Encoder, TextEncoder};
 use ssz_state::{deserialize_partial_state, StatePartial};
@@ -19,6 +22,9 @@ use std::ops::Range;
 use std::str::FromStr;
 use std::time::Duration;
 use tokio::time;
+use serde::Serialize;
+use serde_json::to_string;
+
 
 //use ssz_state::parse_epoch_participation;
 //use ssz_state::ConfigSpec;
@@ -28,6 +34,25 @@ mod metrics;
 mod ranges;
 mod ssz_state;
 mod util;
+mod finality;
+
+#[derive(Clone, Copy)]
+enum DumpFormat {
+    Json,
+    Table,
+}
+
+impl FromStr for DumpFormat {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "json" => Ok(DumpFormat::Json),
+            "table" => Ok(DumpFormat::Table),
+            _ => Ok(DumpFormat::Table),
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -48,7 +73,7 @@ struct Cli {
     ranges_file: Option<String>,
     /// Dump participation ranges print to stderr on each fetch
     #[arg(long)]
-    dump: bool,
+    dump: Option<DumpFormat>,
     /// Metrics server port
     #[arg(long, short, default_value_t = 8080)]
     port: u16,
@@ -177,11 +202,23 @@ fn set_participation_to_metrics(participation_by_range: &ParticipationByRange) {
     }
 }
 
-fn dump_participation_to_stdout(participation_by_range: &ParticipationByRange) {
+
+fn dump_participation(slot: u64, participation_by_range: &ParticipationByRange, format: Option<DumpFormat>) {
+    println!("statistics for slot: {}: ", slot);
+    match format {
+        Some(DumpFormat::Json) => dump_participation_to_stdout_json(slot, participation_by_range),
+        Some(DumpFormat::Table) => dump_participation_to_stdout(slot, participation_by_range),
+        None => ()
+    }
+}
+
+
+fn dump_participation_to_stdout(slot: u64, participation_by_range: &ParticipationByRange) {
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
 
     table.add_row(Row::new(vec![
+        Cell::new("Slot"),
         Cell::new("Name"),
         Cell::new("Range"),
         Cell::new("Source"),
@@ -191,6 +228,7 @@ fn dump_participation_to_stdout(participation_by_range: &ParticipationByRange) {
 
     for (range_name, range, summary) in participation_by_range.iter() {
         table.add_row(Row::new(vec![
+            Cell::new(&format!("{:?}", slot)),
             Cell::new(range_name),
             Cell::new(&format!("{:?}", &range)),
             Cell::new(&summary.source_participation_ratio.to_string()),
@@ -202,14 +240,41 @@ fn dump_participation_to_stdout(participation_by_range: &ParticipationByRange) {
     table.printstd();
 }
 
+#[derive(Serialize)]
+struct ParticipationRecord {
+    slot: u64,
+    name: String,
+    range: String,
+    source: String,
+    target: String,
+    head: String,
+}
+
+fn dump_participation_to_stdout_json(slot: u64, participation_by_range: &ParticipationByRange) {
+    let mut records = Vec::new();
+
+    for (range_name, range, summary) in participation_by_range.iter() {
+        records.push(ParticipationRecord {
+            slot: slot,
+            name: range_name.clone(),
+            range: format!("{:?}", range),
+            source: summary.source_participation_ratio.to_string(),
+            target: summary.target_participation_ratio.to_string(),
+            head: summary.head_participation_ratio.to_string(),
+        });
+    }
+
+    let json = to_string(&records).unwrap();
+    println!("Participation: {}", json);
+}
+
 async fn task_fetch_state_every_epoch(
     genesis: &Genesis,
     config: &ConfigSpec,
     beacon_url: &str,
     extra_headers: &HeaderMap,
     ranges: &IndexRanges,
-    dump: bool,
-    poll: Option<u64>,
+    dump_format: Option<DumpFormat>,
 ) -> Result<()> {
     loop {
         match current_epoch_start_slot(genesis, config) {
@@ -224,29 +289,24 @@ async fn task_fetch_state_every_epoch(
                         Ok(state) => {
                             let participation_by_range = group_target_participation(ranges, &state);
                             set_participation_to_metrics(&participation_by_range);
-                            if dump {
-                                dump_participation_to_stdout(&participation_by_range);
-                            }
+                            dump_participation(slot, &participation_by_range, dump_format);
+                               
                         }
                     }
+
+                    let data = fetch_checkpoint_finality(beacon_url, "head").await?;
+                    let json = to_string(&data).unwrap();
+                    println!("Finality Checkpoint: {}", json);
                 }
             }
         }
 
         // Run once on boot, then every interval at end of epoch
-
-        match poll {
-            None => {
-                time::sleep(to_next_epoch_start(genesis, config).unwrap_or_else(|e| {
-                    eprintln!("error computing to_next_epoch_start: {:?}", e);
-                    Duration::from_secs(config.seconds_per_slot * config.slots_per_epoch)
-                }))
-                .await;
-            }
-            Some(n) => {
-                time::sleep(Duration::from_secs(n)).await;
-            },
-        }
+        time::sleep(to_next_epoch_start(genesis, config).unwrap_or_else(|e| {
+            eprintln!("error computing to_next_epoch_start: {:?}", e);
+            Duration::from_secs(config.seconds_per_slot * config.slots_per_epoch)
+        }))
+        .await;
     }
 }
 
@@ -299,7 +359,6 @@ async fn main() -> Result<()> {
             &extra_headers,
             &ranges,
             cli.dump,
-            cli.poll,
         )
         .await
     });
