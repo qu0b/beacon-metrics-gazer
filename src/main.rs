@@ -296,7 +296,9 @@ async fn task_fetch_state_every_epoch(
 
                     let data = fetch_checkpoint_finality(beacon_url, "head").await?;
                     let json = to_string(&data).unwrap();
-                    println!("{{ slot: {}, finality_checkpoint: {} }}", slot, json);                }
+                    println!("{{ slot: {}, finality_checkpoint: {} }}", slot, json);
+                    
+                }
             }
         }
 
