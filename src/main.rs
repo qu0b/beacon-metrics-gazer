@@ -265,7 +265,7 @@ fn dump_participation_to_stdout_json(slot: u64, participation_by_range: &Partici
     }
 
     let json = to_string(&records).unwrap();
-    println!("{{ participation: {} }}", json);
+    println!("{{ \"participation\": {} }}", json);
 }
 
 async fn task_fetch_state_every_epoch(
@@ -296,7 +296,7 @@ async fn task_fetch_state_every_epoch(
 
                     let data = fetch_checkpoint_finality(beacon_url, "head").await?;
                     let json = to_string(&data).unwrap();
-                    println!("{{ slot: {}, finality_checkpoint: {} }}", slot, json);
+                    println!("{{ \"slot\": {}, \"finality_checkpoint\": {} }}", slot, json);
                     
                 }
             }
